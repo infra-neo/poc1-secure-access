@@ -120,7 +120,7 @@ if [ "$POC_TYPE" == "PoC1" ]; then
     # Wait for Authentik
     log_info "Waiting for Authentik to be ready (this may take a minute)..."
     for i in {1..60}; do
-        if curl -sf http://localhost:9000/if/flow/initial-setup/ &> /dev/null; then
+        if curl -sf http://localhost:9000/-/health/live/ &> /dev/null; then
             log_success "Authentik is ready"
             break
         fi
@@ -160,7 +160,7 @@ log_info "Validating service accessibility..."
 SERVICES_OK=true
 
 # Check Authentik
-if curl -sf http://localhost:9000/if/flow/initial-setup/ &> /dev/null; then
+if curl -sf http://localhost:9000/-/health/live/ &> /dev/null; then
     log_success "✓ Authentik is accessible at http://localhost:9000"
 else
     log_error "✗ Authentik is not accessible at http://localhost:9000"

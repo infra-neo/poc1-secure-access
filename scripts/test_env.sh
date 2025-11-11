@@ -54,9 +54,9 @@ done
 # 3. Check Authentik health endpoint
 echo ""
 echo -e "${BLUE}[CHECK]${NC} Authentik health endpoint..."
-if curl -sf http://localhost:9000/if/flow/initial-setup/ > /dev/null 2>&1; then
+if curl -sf http://localhost:9000/-/health/live/ > /dev/null 2>&1; then
     echo -e "${GREEN}[PASS]${NC} Authentik health check successful"
-    echo -e "       URL: http://localhost:9000/if/flow/initial-setup/"
+    echo -e "       URL: http://localhost:9000/-/health/live/"
 else
     echo -e "${RED}[FAIL]${NC} Authentik health check failed"
     echo -e "       Trying alternative health check..."
