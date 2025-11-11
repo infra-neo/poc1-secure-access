@@ -1,1 +1,1 @@
-# poc1-secure-access
+PoC1 v2 – instalación automática con .env dinámico
