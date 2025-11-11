@@ -1,0 +1,24 @@
+name: Deploy & Test PoC
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init Environment
+        run: bash scripts/init_env.sh
+      - name: Setup
+        run: bash scripts/setup.sh
+      - name: Validate
+        run: bash scripts/test_env.sh | tee logs.txt
+      - name: Summarize
+        run: python3 scripts/summary.py logs.txt > report.txt
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc-report
+          path: report.txt
