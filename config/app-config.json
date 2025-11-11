@@ -1,0 +1,21 @@
+{
+  "application": {
+    "name": "poc1-secure-access",
+    "version": "1.0.0",
+    "description": "POC for secure access implementation with CI/CD pipeline"
+  },
+  "security": {
+    "enabled": true,
+    "audit_logs": true,
+    "encryption": "AES-256"
+  },
+  "pipeline": {
+    "auto_deploy": false,
+    "artifact_retention_days": 30,
+    "test_timeout_minutes": 10
+  },
+  "environment": {
+    "default": "development",
+    "allowed_values": ["development", "staging", "production"]
+  }
+}
