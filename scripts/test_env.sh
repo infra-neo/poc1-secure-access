@@ -7,6 +7,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Load environment variables if available
+if [ -f "config/.env" ]; then
+    set -a
+    source config/.env
+    set +a
+fi
+
 echo "=========================================="
 echo "  PoC Environment Validation"
 echo "=========================================="
@@ -27,7 +34,7 @@ fi
 # 2. Check all containers are running
 echo ""
 echo -e "${BLUE}[CHECK]${NC} Container status..."
-EXPECTED_CONTAINERS=("postgres" "redis" "authentik" "authentik-worker" "jumpserver")
+EXPECTED_CONTAINERS=("postgres" "redis" "authentik" "authentik_worker" "jumpserver")
 
 for container in "${EXPECTED_CONTAINERS[@]}"; do
     if docker ps --format '{{.Names}}' | grep -q "poc1_${container}"; then
@@ -103,8 +110,7 @@ fi
 # 7. Check Redis connectivity
 echo ""
 echo -e "${BLUE}[CHECK]${NC} Redis connectivity..."
-if [ -f "config/.env" ]; then
-    source config/.env
+if [ -n "$REDIS_PASSWORD" ]; then
     if docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
         echo -e "${GREEN}[PASS]${NC} Redis is responding"
     else
@@ -112,7 +118,7 @@ if [ -f "config/.env" ]; then
         ALL_CHECKS_PASSED=false
     fi
 else
-    echo -e "${YELLOW}[WARN]${NC} Cannot test Redis - config/.env not found"
+    echo -e "${YELLOW}[WARN]${NC} Cannot test Redis - REDIS_PASSWORD not set"
 fi
 
 # 8. Display resource usage
