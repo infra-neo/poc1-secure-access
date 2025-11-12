@@ -1,0 +1,71 @@
+name: Neogenesys Secure Access Pipeline
+
+on:
+  client-registration:
+  device-enrollment:
+  infra-deployment:
+  access-request:
+
+jobs:
+
+  register-client:
+    name: "Registro del Cliente y Organización"
+    steps:
+      - Recibir datos del cliente desde el Front Multi-Cloud
+      - Crear Organización / Tenant
+      - Crear Roles base (User, Admin, Auditor)
+      - Registrar dominios y entornos asociados
+      - Generar llaves raíz y tokens iniciales del tenant
+
+  connect-cloud:
+    name: "Conexión a Nube del Cliente"
+    needs: register-client
+    steps:
+      - Detectar proveedor (GCP, AWS, Azure u On-Prem)
+      - Validar permisos del cliente vía CloudLib
+      - Conectar API del proveedor
+      - Verificar redes, subnets y firewalls
+      - Registrar proyecto / VPC en la plataforma
+
+  infra-provision:
+    name: "Despliegue o Enrolamiento de Infraestructura"
+    needs: connect-cloud
+    steps:
+      - Verificar si se requiere:
+          • Crear nueva VM
+          • Conectar VM existente
+      - Instalar Agente de Enrolamiento
+      - Registrar dispositivo en consola de control
+      - Emitir token efímero de seguridad
+      - Crear túnel saliente Zero-Trust (sin puertos abiertos)
+      - Validar conectividad punto-a-punto
+
+  authentik-sync:
+    name: "Registro y Vinculación IAM"
+    needs: infra-provision
+    steps:
+      - Crear usuario o vincular uno existente
+      - Asignar grupos y atributos (banco, permisos, reglas)
+      - Generar credenciales inyectables por flujo SAML/OIDC
+      - Firmar sesión y emitir póliza de acceso
+
+  html5-session:
+    name: "Habilitar Acceso HTML5 / RDP / SSH / VNC"
+    needs: authentik-sync
+    steps:
+      - Crear recurso HTML5 asociado (RDP/VNC/Linux Desktop)
+      - Habilitar grabación, auditoría y replay
+      - Registrar entrada en el catálogo del usuario
+      - Generar endpoint seguro unique-link
+      - encapsular sesión dentro del túnel efímero
+
+  access-final:
+    name: "Acceso del Usuario Final"
+    needs: html5-session
+    steps:
+      - Usuario inicia sesión en Authentik
+      - Authentik firma la sesión → IAM Policy OK
+      - Autologin al destino con credenciales inyectadas
+      - Ejecutar sesión HTML5 vía túnel seguro
+      - Registrar auditoría, IP interna, tiempo, comandos, URLs visitadas
+      - Enviar evento a auditoría/compliance
