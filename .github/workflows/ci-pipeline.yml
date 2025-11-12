@@ -1,215 +1,71 @@
-name: CI Pipeline
+name: Neogenesys Secure Access Pipeline
 
 on:
-  push:
-    branches:
-      - main
-      - 'copilot/**'
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+  client-registration:
+  device-enrollment:
+  infra-deployment:
+  access-request:
 
 jobs:
-  setup:
-    name: Setup
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      timestamp: ${{ steps.timestamp.outputs.timestamp }}
+
+  register-client:
+    name: "Registro del Cliente y Organización"
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - Recibir datos del cliente desde el Front Multi-Cloud
+      - Crear Organización / Tenant
+      - Crear Roles base (User, Admin, Auditor)
+      - Registrar dominios y entornos asociados
+      - Generar llaves raíz y tokens iniciales del tenant
 
-      - name: Generate timestamp
-        id: timestamp
-        run: echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
-
-      - name: Setup environment
-        run: |
-          echo "Setting up environment..."
-          echo "Repository: ${{ github.repository }}"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
-
-      - name: Validate structure
-        run: |
-          echo "Validating repository structure..."
-          test -d .github/workflows && echo "✓ .github/workflows exists"
-          test -d .github/agents && echo "✓ .github/agents exists"
-          test -d scripts && echo "✓ scripts exists"
-          test -d config && echo "✓ config exists"
-          test -f LICENSE && echo "✓ LICENSE exists"
-          test -f .gitignore && echo "✓ .gitignore exists"
-          test -f README.md && echo "✓ README.md exists"
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    needs: setup
+  connect-cloud:
+    name: "Conexión a Nube del Cliente"
+    needs: register-client
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - Detectar proveedor (GCP, AWS, Azure u On-Prem)
+      - Validar permisos del cliente vía CloudLib
+      - Conectar API del proveedor
+      - Verificar redes, subnets y firewalls
+      - Registrar proyecto / VPC en la plataforma
 
-      - name: Run validation tests
-        run: |
-          echo "Running validation tests..."
-          bash scripts/validate.sh
-
-      - name: Run security checks
-        run: |
-          echo "Running security checks..."
-          bash scripts/security-check.sh
-
-      - name: Generate test report
-        run: |
-          echo "Generating test report..."
-          mkdir -p artifacts
-          cat > artifacts/test-report.txt <<EOF
-          Test Report - ${{ needs.setup.outputs.timestamp }}
-          ================================================
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
-          Workflow: ${{ github.workflow }}
-          Run Number: ${{ github.run_number }}
-          
-          All tests passed successfully!
-          EOF
-
-  summary:
-    name: Summary
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    needs: [setup, test]
+  infra-provision:
+    name: "Despliegue o Enrolamiento de Infraestructura"
+    needs: connect-cloud
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - Verificar si se requiere:
+          • Crear nueva VM
+          • Conectar VM existente
+      - Instalar Agente de Enrolamiento
+      - Registrar dispositivo en consola de control
+      - Emitir token efímero de seguridad
+      - Crear túnel saliente Zero-Trust (sin puertos abiertos)
+      - Validar conectividad punto-a-punto
 
-      - name: Generate summary
-        run: |
-          echo "## Pipeline Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Pipeline completed successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Timestamp**: ${{ needs.setup.outputs.timestamp }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Run Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
-
-      - name: Create summary artifact
-        run: |
-          mkdir -p artifacts
-          cat > artifacts/pipeline-summary.md <<EOF
-          # Pipeline Execution Summary
-          
-          ## Execution Details
-          - **Repository**: ${{ github.repository }}
-          - **Branch**: ${{ github.ref_name }}
-          - **Commit**: ${{ github.sha }}
-          - **Workflow**: ${{ github.workflow }}
-          - **Run Number**: ${{ github.run_number }}
-          - **Timestamp**: ${{ needs.setup.outputs.timestamp }}
-          
-          ## Job Status
-          - ✅ Setup: Completed
-          - ✅ Test: Completed
-          - ✅ Summary: Completed
-          
-          ## Artifacts
-          This pipeline generates the following artifacts:
-          - Test report
-          - Pipeline summary
-          
-          All jobs completed successfully!
-          EOF
-
-  upload-artifacts:
-    name: Upload Artifacts
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    needs: [setup, test, summary]
+  authentik-sync:
+    name: "Registro y Vinculación IAM"
+    needs: infra-provision
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - Crear usuario o vincular uno existente
+      - Asignar grupos y atributos (banco, permisos, reglas)
+      - Generar credenciales inyectables por flujo SAML/OIDC
+      - Firmar sesión y emitir póliza de acceso
 
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-          
-          # Copy test report from test job
-          cat > artifacts/test-report.txt <<EOF
-          Test Report - ${{ needs.setup.outputs.timestamp }}
-          ================================================
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
-          Workflow: ${{ github.workflow }}
-          Run Number: ${{ github.run_number }}
-          
-          All tests passed successfully!
-          EOF
-          
-          # Create summary artifact
-          cat > artifacts/pipeline-summary.md <<EOF
-          # Pipeline Execution Summary
-          
-          ## Execution Details
-          - **Repository**: ${{ github.repository }}
-          - **Branch**: ${{ github.ref_name }}
-          - **Commit**: ${{ github.sha }}
-          - **Workflow**: ${{ github.workflow }}
-          - **Run Number**: ${{ github.run_number }}
-          - **Timestamp**: ${{ needs.setup.outputs.timestamp }}
-          
-          ## Job Status
-          - ✅ Setup: Completed
-          - ✅ Test: Completed
-          - ✅ Summary: Completed
-          - ✅ Upload Artifacts: In Progress
-          
-          ## Artifacts
-          This pipeline generates the following artifacts:
-          - test-report.txt
-          - pipeline-summary.md
-          
-          All jobs completed successfully!
-          EOF
-          
-          # Create metadata
-          cat > artifacts/metadata.json <<EOF
-          {
-            "repository": "${{ github.repository }}",
-            "branch": "${{ github.ref_name }}",
-            "commit": "${{ github.sha }}",
-            "workflow": "${{ github.workflow }}",
-            "run_number": "${{ github.run_number }}",
-            "timestamp": "${{ needs.setup.outputs.timestamp }}"
-          }
-          EOF
-          
-          echo "Artifacts prepared:"
-          ls -la artifacts/
+  html5-session:
+    name: "Habilitar Acceso HTML5 / RDP / SSH / VNC"
+    needs: authentik-sync
+    steps:
+      - Crear recurso HTML5 asociado (RDP/VNC/Linux Desktop)
+      - Habilitar grabación, auditoría y replay
+      - Registrar entrada en el catálogo del usuario
+      - Generar endpoint seguro unique-link
+      - encapsular sesión dentro del túnel efímero
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-artifacts-${{ needs.setup.outputs.timestamp }}
-          path: artifacts/
-          retention-days: 30
-
-      - name: Upload summary
-        run: |
-          echo "## Artifacts Uploaded" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All artifacts have been uploaded successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Artifact Name" >> $GITHUB_STEP_SUMMARY
-          echo "- pipeline-artifacts-${{ needs.setup.outputs.timestamp }}" >> $GITHUB_STEP_SUMMARY
+  access-final:
+    name: "Acceso del Usuario Final"
+    needs: html5-session
+    steps:
+      - Usuario inicia sesión en Authentik
+      - Authentik firma la sesión → IAM Policy OK
+      - Autologin al destino con credenciales inyectadas
+      - Ejecutar sesión HTML5 vía túnel seguro
+      - Registrar auditoría, IP interna, tiempo, comandos, URLs visitadas
+      - Enviar evento a auditoría/compliance
