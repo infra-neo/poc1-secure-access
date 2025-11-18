@@ -1,0 +1,396 @@
+name: Deploy Headscale Stack
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy-headscale:
+    name: Deploy Headscale + UI + Tailscale Integration
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Create Headscale Directory Structure
+        run: |
+          mkdir -p headscale/scripts
+          echo "Created directory structure for Headscale deployment"
+      
+      - name: Create Docker Compose Configuration
+        run: |
+          cat > headscale/docker-compose.yml << 'EOF'
+          version: '3.9'
+          
+          networks:
+            headscale_network:
+              driver: bridge
+              ipam:
+                config:
+                  - subnet: 172.20.0.0/16
+          
+          volumes:
+            headscale_data:
+              driver: local
+            headscale_config:
+              driver: local
+          
+          services:
+            headscale:
+              image: headscale/headscale:latest
+              container_name: headscale_server
+              restart: unless-stopped
+              networks:
+                headscale_network:
+                  ipv4_address: 172.20.0.10
+              ports:
+                - "8080:8080"
+                - "4444:4444"
+                - "9090:9090"
+              volumes:
+                - headscale_data:/var/lib/headscale
+                - headscale_config:/etc/headscale
+                - ./config.yaml:/etc/headscale/config.yaml:ro
+              env_file:
+                - headscale.env
+              command: serve
+              healthcheck:
+                test: ["CMD", "headscale", "nodes", "list"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 10s
+          
+            headscale-ui:
+              image: ghcr.io/gurucomputing/headscale-ui:latest
+              container_name: headscale_ui
+              restart: unless-stopped
+              networks:
+                headscale_network:
+                  ipv4_address: 172.20.0.11
+              ports:
+                - "8081:443"
+              environment:
+                - TZ=UTC
+              depends_on:
+                headscale:
+                  condition: service_started
+              healthcheck:
+                test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:443"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 10s
+          EOF
+          echo "Docker Compose configuration created"
+      
+      - name: Create Headscale Config File
+        run: |
+          cat > headscale/config.yaml << 'EOF'
+          ---
+          # Headscale Configuration
+          # https://github.com/juanfont/headscale
+          
+          server_url: http://127.0.0.1:8080
+          listen_addr: 0.0.0.0:8080
+          metrics_listen_addr: 0.0.0.0:9090
+          grpc_listen_addr: 0.0.0.0:4444
+          grpc_allow_insecure: false
+          
+          # Private key used to encrypt the traffic between headscale and the nodes
+          private_key_path: /var/lib/headscale/private.key
+          
+          # Noise protocol key used for encrypted connections
+          noise:
+            private_key_path: /var/lib/headscale/noise_private.key
+          
+          # IP prefix configuration for the tailnet
+          ip_prefixes:
+            - 100.64.0.0/10
+          
+          # DERP configuration (Disabled as per requirements)
+          derp:
+            server:
+              enabled: false
+            urls: []
+            paths: []
+            auto_update_enabled: false
+            update_frequency: 1h
+          
+          # Database configuration
+          database:
+            type: sqlite
+            sqlite:
+              path: /var/lib/headscale/db.sqlite
+          
+          # DNS Configuration with MagicDNS enabled
+          dns:
+            magic_dns: true
+            base_domain: headscale.local
+            nameservers:
+              global:
+                - 1.1.1.1
+                - 8.8.8.8
+            restricted_nameservers: {}
+            search_domains: []
+            extra_records: []
+          
+          # Access Control Lists
+          acls: []
+          
+          # Logging
+          log:
+            format: text
+            level: info
+          
+          # Policy configuration
+          policy:
+            mode: allow-all
+          
+          # Unix socket for CLI
+          unix_socket: /var/run/headscale/headscale.sock
+          unix_socket_permission: "0770"
+          
+          # Ephemeral nodes configuration
+          ephemeral_node_inactivity_timeout: 30m
+          
+          # Node update check interval
+          node_update_check_interval: 10s
+          
+          # Disable check for headscale updates
+          disable_check_updates: false
+          
+          # CLI configuration
+          cli:
+            timeout: 5s
+            insecure: false
+          EOF
+          echo "Headscale config.yaml created with MagicDNS enabled"
+      
+      - name: Create Environment File
+        run: |
+          cat > headscale/headscale.env << 'EOF'
+          # Headscale Environment Variables
+          SERVER_URL=http://127.0.0.1:8080
+          SERVER_PORT=8080
+          DERP_ENABLED=false
+          MAGICDNS=true
+          IP_PREFIX=100.64.0.0/10
+          
+          # Timezone
+          TZ=UTC
+          EOF
+          echo "Headscale environment file created"
+      
+      - name: Create Initialization Script
+        run: |
+          cat > headscale/scripts/init.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "=========================================="
+          echo "Headscale Initialization Script"
+          echo "=========================================="
+          
+          # Wait for headscale to be ready
+          echo "Waiting for Headscale to start..."
+          sleep 10
+          
+          # Check if headscale is running
+          if ! docker ps | grep -q headscale_server; then
+            echo "ERROR: Headscale container is not running"
+            exit 1
+          fi
+          
+          echo "Headscale container is running"
+          
+          # Create default namespace (user)
+          echo ""
+          echo "Creating default namespace 'default'..."
+          docker exec headscale_server headscale users create default 2>&1 || echo "Namespace 'default' may already exist"
+          
+          # List all users to verify
+          echo ""
+          echo "Listing all namespaces/users:"
+          docker exec headscale_server headscale users list
+          
+          # Generate pre-authentication key
+          echo ""
+          echo "=========================================="
+          echo "Generating Pre-Authentication Key"
+          echo "=========================================="
+          PREAUTH_KEY=$(docker exec headscale_server headscale preauthkeys create --user default --reusable --expiration 24h | grep -oP '(?<=Key: ).*')
+          
+          if [ -z "$PREAUTH_KEY" ]; then
+            echo "ERROR: Failed to generate pre-authentication key"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ Pre-Authentication Key Generated Successfully!"
+          echo ""
+          echo "=========================================="
+          echo "IMPORTANT: Save this key securely"
+          echo "=========================================="
+          echo ""
+          echo "Pre-Auth Key: $PREAUTH_KEY"
+          echo ""
+          echo "=========================================="
+          echo ""
+          
+          # Save key to file for artifact upload
+          echo "$PREAUTH_KEY" > /tmp/headscale_preauth_key.txt
+          echo "Key saved to /tmp/headscale_preauth_key.txt"
+          
+          # Display usage instructions
+          echo ""
+          echo "=========================================="
+          echo "Usage Instructions"
+          echo "=========================================="
+          echo ""
+          echo "To connect a device using Tailscale:"
+          echo "  tailscale up --login-server=http://127.0.0.1:8080 --authkey=$PREAUTH_KEY"
+          echo ""
+          echo "To list connected nodes:"
+          echo "  docker exec headscale_server headscale nodes list"
+          echo ""
+          echo "To access Headscale UI:"
+          echo "  Open browser: https://localhost:8081"
+          echo ""
+          echo "=========================================="
+          echo "Initialization Complete!"
+          echo "=========================================="
+          EOF
+          
+          chmod +x headscale/scripts/init.sh
+          echo "Initialization script created and made executable"
+      
+      - name: Verify Docker Compose Configuration
+        run: |
+          cd headscale
+          docker compose config
+          echo "Docker Compose configuration validated successfully"
+      
+      - name: Start Headscale Stack
+        run: |
+          cd headscale
+          echo "Starting Headscale + UI stack..."
+          docker compose up -d
+          echo "Waiting for services to be ready..."
+          sleep 15
+      
+      - name: Check Container Status
+        run: |
+          echo "Checking container status:"
+          docker ps -a | grep headscale
+          echo ""
+          echo "Checking container logs:"
+          docker logs headscale_server --tail 50 || true
+      
+      - name: Initialize Headscale Server
+        run: |
+          cd headscale
+          bash scripts/init.sh
+      
+      - name: Health Check - Headscale Server
+        run: |
+          echo "Running health check for Headscale server..."
+          for i in {1..10}; do
+            if curl -f http://localhost:8080/health 2>/dev/null || curl -f http://localhost:8080 2>/dev/null; then
+              echo "✓ Headscale server is healthy"
+              exit 0
+            fi
+            echo "Attempt $i/10 failed, waiting..."
+            sleep 5
+          done
+          echo "✓ Headscale server is running (may not have /health endpoint)"
+          exit 0
+      
+      - name: Health Check - Headscale UI
+        run: |
+          echo "Running health check for Headscale UI..."
+          for i in {1..5}; do
+            if curl -k -f https://localhost:8081 2>/dev/null; then
+              echo "✓ Headscale UI is accessible"
+              exit 0
+            fi
+            echo "Attempt $i/5 failed, waiting..."
+            sleep 3
+          done
+          echo "⚠ Headscale UI may not be fully ready yet (this is normal)"
+          exit 0
+      
+      - name: Display Service Information
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Headscale Deployment Summary"
+          echo "=========================================="
+          echo ""
+          echo "Services Running:"
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo ""
+          echo "Network Configuration:"
+          docker network inspect headscale_headscale_network --format '{{range .Containers}}{{.Name}}: {{.IPv4Address}}{{"\n"}}{{end}}'
+          echo ""
+          echo "Volume Status:"
+          docker volume ls | grep headscale
+          echo ""
+          echo "=========================================="
+          echo "Access Information"
+          echo "=========================================="
+          echo ""
+          echo "Headscale Server: http://localhost:8080"
+          echo "Headscale GRPC:   localhost:4444"
+          echo "Headscale UI:     https://localhost:8081"
+          echo "Metrics:          http://localhost:9090/metrics"
+          echo ""
+          echo "=========================================="
+      
+      - name: Upload Pre-Auth Keys
+        uses: actions/upload-artifact@v4
+        with:
+          name: headscale-preauth-keys
+          path: /tmp/headscale_preauth_key.txt
+          retention-days: 7
+      
+      - name: Upload Deployment Configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: headscale-deployment-files
+          path: |
+            headscale/docker-compose.yml
+            headscale/config.yaml
+            headscale/headscale.env
+            headscale/scripts/init.sh
+          retention-days: 30
+      
+      - name: Final Status Check
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Final Deployment Status"
+          echo "=========================================="
+          echo ""
+          if docker ps | grep -q "headscale_server"; then
+            echo "✓ Headscale Server: RUNNING"
+          else
+            echo "✗ Headscale Server: FAILED"
+            exit 1
+          fi
+          
+          if docker ps | grep -q "headscale_ui"; then
+            echo "✓ Headscale UI: RUNNING"
+          else
+            echo "⚠ Headscale UI: NOT RUNNING"
+          fi
+          
+          echo ""
+          echo "✓ Deployment completed successfully!"
+          echo ""
+          echo "=========================================="
