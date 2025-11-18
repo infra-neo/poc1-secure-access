@@ -115,7 +115,7 @@ jobs:
           
           # IP prefix configuration for the tailnet
           ip_prefixes:
-            - 100.64.0.0/10
+            - "100.64.0.0/10"
           
           # DERP configuration (Disabled as per requirements)
           derp:
